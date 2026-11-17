@@ -1,0 +1,576 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Core Primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() && request.auth.token.email == 'aammj227@gmail.com';
+    }
+
+    function isManager() {
+      return isBootstrappedAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // Entity Validators
+    function isValidAdmin(data) {
+      return data.keys().hasAll(['uid', 'email', 'grantedAt']) &&
+        data.keys().hasOnly(['uid', 'email', 'grantedAt']) &&
+        isValidId(data.uid) &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+        data.grantedAt is timestamp;
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'branch', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'displayName', 'email', 'role', 'branch', 'createdAt', 'updatedAt']) &&
+        isValidId(data.uid) &&
+        data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+        data.role in ['agent', 'station_supervisor', 'manager', 'quality_auditor', 'system_admin'] &&
+        data.branch is string && data.branch.size() >= 1 && data.branch.size() <= 100 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['name', 'phone', 'city', 'preferredBranch', 'segment', 'totalComplaints', 'ownerId', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['name', 'phone', 'city', 'preferredBranch', 'segment', 'totalComplaints', 'ownerId', 'createdAt', 'updatedAt']) &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 120 &&
+        data.phone is string && data.phone.size() >= 5 && data.phone.size() <= 30 &&
+        data.city is string && data.city.size() >= 1 && data.city.size() <= 60 &&
+        data.preferredBranch is string && data.preferredBranch.size() >= 1 && data.preferredBranch.size() <= 100 &&
+        data.segment in ['individual', 'fleet', 'corporate'] &&
+        data.totalComplaints is int && data.totalComplaints >= 0 && data.totalComplaints <= 100000 &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAttachmentMeta(meta) {
+      return meta is map &&
+        meta.keys().hasAll(['fileName', 'fileType', 'sizeBytes']) &&
+        meta.keys().hasOnly(['fileName', 'fileType', 'sizeBytes']) &&
+        meta.fileName is string && meta.fileName.size() >= 1 && meta.fileName.size() <= 200 &&
+        meta.fileType is string && meta.fileType.size() >= 1 && meta.fileType.size() <= 100 &&
+        meta.sizeBytes is int && meta.sizeBytes >= 0 && meta.sizeBytes <= 20000000;
+    }
+
+    function isValidAuditEntry(entry) {
+      return entry is map &&
+        entry.keys().hasAll(['id', 'timestamp', 'actorName', 'actorRole', 'fromStatus', 'toStatus', 'action', 'note']) &&
+        entry.keys().hasOnly(['id', 'timestamp', 'actorName', 'actorRole', 'fromStatus', 'toStatus', 'action', 'note']) &&
+        entry.id is string && entry.id.size() >= 1 && entry.id.size() <= 64 &&
+        entry.timestamp is string && entry.timestamp.size() >= 4 && entry.timestamp.size() <= 64 &&
+        entry.actorName is string && entry.actorName.size() >= 1 && entry.actorName.size() <= 100 &&
+        entry.actorRole is string && entry.actorRole.size() >= 1 && entry.actorRole.size() <= 64 &&
+        entry.fromStatus is string && entry.fromStatus.size() <= 40 &&
+        entry.toStatus is string && entry.toStatus.size() >= 1 && entry.toStatus.size() <= 40 &&
+        entry.action is string && entry.action.size() >= 1 && entry.action.size() <= 120 &&
+        entry.note is string && entry.note.size() <= 600;
+    }
+
+    function isValidComplaint(data) {
+      return data.keys().hasAll([
+          'ticketCode', 'customerId', 'customerName', 'customerPhone',
+          'branch', 'pumpNumber', 'category', 'channel', 'priority',
+          'status', 'description', 'aiSummary', 'codeSentViaWhatsapp',
+          'ownerId', 'assignedAgentName', 'managerNotes', 'closureReason',
+          'closedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ticketCode', 'customerId', 'customerName', 'customerPhone',
+          'branch', 'pumpNumber', 'category', 'channel', 'priority', 'slaTier',
+          'status', 'description', 'aiSummary', 'codeSentViaWhatsapp',
+          'stationUnknown', 'attachmentMeta', 'occurredAt', 'firstResponseAt',
+          'resolvedAt', 'pausedAt', 'pausedTotalMinutes', 'pauseCount',
+          'pauseReason', 'pauseReminderAt', 'escalationLevel', 'escalationOwner',
+          'resolutionEvidence', 'publicUpdateNote', 'customerConfirmed',
+          'csatScore', 'csatComment', 'reopenCount', 'reopenReason',
+          'previousSolution', 'cancellationReason', 'auditTrail',
+          'ownerId', 'assignedAgentName', 'managerNotes', 'closureReason',
+          'closedBy', 'closedAt', 'createdAt', 'updatedAt'
+        ]) &&
+        data.ticketCode is string && data.ticketCode.size() >= 6 && data.ticketCode.size() <= 32 && data.ticketCode.matches('^FNR-[0-9A-Z\\-]+$') &&
+        isValidId(data.customerId) &&
+        data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120 &&
+        data.customerPhone is string && data.customerPhone.size() >= 5 && data.customerPhone.size() <= 30 &&
+        data.branch is string && data.branch.size() >= 1 && data.branch.size() <= 100 &&
+        data.pumpNumber is string && data.pumpNumber.size() <= 20 &&
+        data.category in ['fuel_quality', 'billing_pump', 'cleanliness_facilities', 'staff_service', 'fleet_cards', 'other'] &&
+        data.channel in ['whatsapp', 'phone', 'direct', 'portal'] &&
+        data.priority in ['normal', 'high', 'urgent'] &&
+        (!('slaTier' in data) || data.slaTier in ['P1', 'P2', 'P3', 'P4']) &&
+        data.status in ['new', 'in_progress', 'waiting_customer', 'pending_manager', 'resolved', 'closed', 'reopened', 'cancelled'] &&
+        data.description is string && data.description.size() >= 1 && data.description.size() <= 2000 &&
+        data.aiSummary is string && data.aiSummary.size() <= 1000 &&
+        data.codeSentViaWhatsapp is bool &&
+        (!('stationUnknown' in data) || data.stationUnknown is bool) &&
+        (!('attachmentMeta' in data) || isValidAttachmentMeta(data.attachmentMeta)) &&
+        (!('occurredAt' in data) || data.occurredAt is timestamp) &&
+        (!('firstResponseAt' in data) || data.firstResponseAt is timestamp) &&
+        (!('resolvedAt' in data) || data.resolvedAt is timestamp) &&
+        (!('pausedAt' in data) || data.pausedAt == null || data.pausedAt is timestamp) &&
+        (!('pausedTotalMinutes' in data) || (data.pausedTotalMinutes is int && data.pausedTotalMinutes >= 0 && data.pausedTotalMinutes <= 1000000)) &&
+        (!('pauseCount' in data) || (data.pauseCount is int && data.pauseCount >= 0 && data.pauseCount <= 100)) &&
+        (!('pauseReason' in data) || (data.pauseReason is string && data.pauseReason.size() <= 400)) &&
+        (!('pauseReminderAt' in data) || (data.pauseReminderAt is string && data.pauseReminderAt.size() <= 60)) &&
+        (!('escalationLevel' in data) || (data.escalationLevel is int && data.escalationLevel >= 0 && data.escalationLevel <= 3)) &&
+        (!('escalationOwner' in data) || (data.escalationOwner is string && data.escalationOwner.size() <= 120)) &&
+        (!('resolutionEvidence' in data) || (data.resolutionEvidence is string && data.resolutionEvidence.size() <= 600)) &&
+        (!('publicUpdateNote' in data) || (data.publicUpdateNote is string && data.publicUpdateNote.size() <= 600)) &&
+        (!('customerConfirmed' in data) || data.customerConfirmed is bool) &&
+        (!('csatScore' in data) || (data.csatScore is int && data.csatScore >= 0 && data.csatScore <= 5)) &&
+        (!('csatComment' in data) || (data.csatComment is string && data.csatComment.size() <= 600)) &&
+        (!('reopenCount' in data) || (data.reopenCount is int && data.reopenCount >= 0 && data.reopenCount <= 50)) &&
+        (!('reopenReason' in data) || (data.reopenReason is string && data.reopenReason.size() <= 400)) &&
+        (!('previousSolution' in data) || (data.previousSolution is string && data.previousSolution.size() <= 600)) &&
+        (!('cancellationReason' in data) || (data.cancellationReason is string && data.cancellationReason.size() <= 400)) &&
+        (!('auditTrail' in data) || (
+          data.auditTrail is list &&
+          data.auditTrail.size() <= 30 &&
+          (data.auditTrail.size() == 0 || isValidAuditEntry(data.auditTrail[0]))
+        )) &&
+        isValidId(data.ownerId) &&
+        data.assignedAgentName is string && data.assignedAgentName.size() <= 100 &&
+        data.managerNotes is string && data.managerNotes.size() <= 2000 &&
+        data.closureReason is string && data.closureReason.size() <= 200 &&
+        data.closedBy is string && data.closedBy.size() <= 120 &&
+        (!('closedAt' in data) || data.closedAt is timestamp) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidConversation(data) {
+      return data.keys().hasAll([
+          'customerId', 'customerName', 'customerPhone', 'aiAutoReplyEnabled',
+          'lastMessage', 'linkedTicketCode', 'unreadCount', 'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'customerId', 'customerName', 'customerPhone', 'aiAutoReplyEnabled',
+          'lastMessage', 'linkedTicketCode', 'unreadCount', 'ownerId', 'createdAt', 'updatedAt',
+          'handoffStatus', 'handoffReason', 'handoffAt', 'lastIntent',
+          'escalationRule', 'consecutiveAiFailures', 'occurredAt'
+        ]) &&
+        isValidId(data.customerId) &&
+        data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120 &&
+        data.customerPhone is string && data.customerPhone.size() >= 5 && data.customerPhone.size() <= 30 &&
+        data.aiAutoReplyEnabled is bool &&
+        data.lastMessage is string && data.lastMessage.size() <= 1000 &&
+        data.linkedTicketCode is string && data.linkedTicketCode.size() <= 32 &&
+        data.unreadCount is int && data.unreadCount >= 0 && data.unreadCount <= 10000 &&
+        (!('handoffStatus' in data) || data.handoffStatus in ['bot_active', 'escalated_to_agent', 'agent_handling']) &&
+        (!('handoffReason' in data) || (data.handoffReason is string && data.handoffReason.size() <= 400)) &&
+        (!('handoffAt' in data) || data.handoffAt is timestamp) &&
+        (!('lastIntent' in data) || data.lastIntent in ['greeting', 'faq', 'order_status', 'complaint', 'escalation', 'unknown']) &&
+        (!('escalationRule' in data) || data.escalationRule in ['none', 'explicit_request', 'missing_knowledge', 'sensitive_case', 'repeated_failure', 'angry_or_reopen']) &&
+        (!('consecutiveAiFailures' in data) || (data.consecutiveAiFailures is int && data.consecutiveAiFailures >= 0 && data.consecutiveAiFailures <= 50)) &&
+        (!('occurredAt' in data) || data.occurredAt is timestamp) &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidWhatsappMessage(data) {
+      return data.keys().hasAll(['sender', 'senderName', 'body', 'messageType', 'ticketCode', 'ownerId', 'createdAt']) &&
+        data.keys().hasOnly(['sender', 'senderName', 'body', 'messageType', 'ticketCode', 'ownerId', 'createdAt']) &&
+        data.sender in ['customer', 'ai', 'agent'] &&
+        data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100 &&
+        data.body is string && data.body.size() >= 1 && data.body.size() <= 2000 &&
+        data.messageType in ['text', 'ticket_code', 'closure_notice', 'handoff_notice'] &&
+        data.ticketCode is string && data.ticketCode.size() <= 32 &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidCallLog(data) {
+      return data.keys().hasAll([
+          'callerName', 'callerPhone', 'branch', 'durationSeconds',
+          'handledBy', 'transcript', 'aiSummary', 'linkedTicketCode',
+          'codeSentViaWhatsapp', 'ownerId', 'createdAt'
+        ]) &&
+        data.keys().hasOnly([
+          'callerName', 'callerPhone', 'branch', 'durationSeconds',
+          'handledBy', 'transcript', 'aiSummary', 'linkedTicketCode',
+          'codeSentViaWhatsapp', 'ownerId', 'createdAt'
+        ]) &&
+        data.callerName is string && data.callerName.size() >= 1 && data.callerName.size() <= 120 &&
+        data.callerPhone is string && data.callerPhone.size() >= 5 && data.callerPhone.size() <= 30 &&
+        data.branch is string && data.branch.size() <= 100 &&
+        data.durationSeconds is int && data.durationSeconds >= 0 && data.durationSeconds <= 86400 &&
+        data.handledBy in ['ai_ivr', 'agent'] &&
+        data.transcript is string && data.transcript.size() >= 1 && data.transcript.size() <= 4000 &&
+        data.aiSummary is string && data.aiSummary.size() <= 1000 &&
+        data.linkedTicketCode is string && data.linkedTicketCode.size() <= 32 &&
+        data.codeSentViaWhatsapp is bool &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp;
+    }
+
+    function isValidFaqItem(item) {
+      return item is map &&
+        item.keys().hasAll(['id', 'question', 'answer', 'category', 'enabled']) &&
+        item.keys().hasOnly(['id', 'question', 'answer', 'category', 'enabled']) &&
+        item.id is string && item.id.size() >= 1 && item.id.size() <= 64 &&
+        item.question is string && item.question.size() >= 1 && item.question.size() <= 300 &&
+        item.answer is string && item.answer.size() >= 1 && item.answer.size() <= 1000 &&
+        item.category in ['products', 'services', 'hours', 'orders', 'general'] &&
+        item.enabled is bool;
+    }
+
+    function isValidBotConfig(data) {
+      return data.keys().hasAll([
+          'ownerId', 'botName', 'welcomeMessage', 'toneInstruction',
+          'autoEscalateComplex', 'escalationMessage', 'workingHoursSummary',
+          'productsInfo', 'servicesInfo', 'branchesInfo', 'faqs',
+          'updatedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'ownerId', 'botName', 'officialWhatsappNumber', 'welcomeMessage', 'toneInstruction',
+          'autoEscalateComplex', 'escalationMessage', 'workingHoursSummary',
+          'productsInfo', 'servicesInfo', 'branchesInfo', 'faqs',
+          'updatedBy', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.ownerId) &&
+        data.botName is string && data.botName.size() >= 1 && data.botName.size() <= 80 &&
+        (!('officialWhatsappNumber' in data) || (data.officialWhatsappNumber is string && data.officialWhatsappNumber.size() >= 5 && data.officialWhatsappNumber.size() <= 30)) &&
+        data.welcomeMessage is string && data.welcomeMessage.size() >= 1 && data.welcomeMessage.size() <= 600 &&
+        data.toneInstruction is string && data.toneInstruction.size() >= 1 && data.toneInstruction.size() <= 600 &&
+        data.autoEscalateComplex is bool &&
+        data.escalationMessage is string && data.escalationMessage.size() >= 1 && data.escalationMessage.size() <= 600 &&
+        data.workingHoursSummary is string && data.workingHoursSummary.size() >= 1 && data.workingHoursSummary.size() <= 1000 &&
+        data.productsInfo is string && data.productsInfo.size() >= 1 && data.productsInfo.size() <= 1500 &&
+        data.servicesInfo is string && data.servicesInfo.size() >= 1 && data.servicesInfo.size() <= 1500 &&
+        data.branchesInfo is string && data.branchesInfo.size() >= 1 && data.branchesInfo.size() <= 1500 &&
+        data.faqs is list && data.faqs.size() <= 30 &&
+        (data.faqs.size() == 0 || isValidFaqItem(data.faqs[0])) &&
+        data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 120 &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidQualityAudit(data) {
+      return data.keys().hasAll([
+          'complaintId', 'ticketCode', 'stationName', 'auditorName',
+          'problemUnderstanding', 'communication', 'solutionAndEvidence',
+          'recordCompleteness', 'privacyCompliance', 'totalScore',
+          'improvementNotes', 'status', 'monthKey', 'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'complaintId', 'ticketCode', 'stationName', 'auditorName',
+          'problemUnderstanding', 'communication', 'solutionAndEvidence',
+          'recordCompleteness', 'privacyCompliance', 'totalScore',
+          'improvementNotes', 'status', 'monthKey', 'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        isValidId(data.complaintId) &&
+        data.ticketCode is string && data.ticketCode.size() >= 6 && data.ticketCode.size() <= 32 && data.ticketCode.matches('^FNR-[0-9A-Z\\-]+$') &&
+        data.stationName is string && data.stationName.size() >= 1 && data.stationName.size() <= 100 &&
+        data.auditorName is string && data.auditorName.size() >= 1 && data.auditorName.size() <= 100 &&
+        data.problemUnderstanding is int && data.problemUnderstanding >= 0 && data.problemUnderstanding <= 100 &&
+        data.communication is int && data.communication >= 0 && data.communication <= 100 &&
+        data.solutionAndEvidence is int && data.solutionAndEvidence >= 0 && data.solutionAndEvidence <= 100 &&
+        data.recordCompleteness is int && data.recordCompleteness >= 0 && data.recordCompleteness <= 100 &&
+        data.privacyCompliance is int && data.privacyCompliance >= 0 && data.privacyCompliance <= 100 &&
+        data.totalScore is int && data.totalScore >= 0 && data.totalScore <= 100 &&
+        data.improvementNotes is string && data.improvementNotes.size() <= 1000 &&
+        data.status in ['passed', 'needs_improvement'] &&
+        data.monthKey is string && data.monthKey.size() == 7 && data.monthKey.matches('^[0-9]{4}-[0-9]{2}$') &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidActionPlanItem(data) {
+      return data.keys().hasAll([
+          'title', 'rootCause', 'ownerName', 'dueDateLabel',
+          'targetMetric', 'status', 'monthKey', 'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'title', 'rootCause', 'ownerName', 'dueDateLabel',
+          'targetMetric', 'status', 'monthKey', 'ownerId', 'createdAt', 'updatedAt'
+        ]) &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+        data.rootCause is string && data.rootCause.size() >= 1 && data.rootCause.size() <= 400 &&
+        data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 120 &&
+        data.dueDateLabel is string && data.dueDateLabel.size() >= 1 && data.dueDateLabel.size() <= 60 &&
+        data.targetMetric is string && data.targetMetric.size() >= 1 && data.targetMetric.size() <= 200 &&
+        data.status in ['open', 'in_progress', 'completed'] &&
+        data.monthKey is string && data.monthKey.size() == 7 && data.monthKey.matches('^[0-9]{4}-[0-9]{2}$') &&
+        isValidId(data.ownerId) &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // Admins Collection
+    match /admins/{adminId} {
+      allow get: if isValidId(adminId) && isSignedIn() && (adminId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(adminId) && isBootstrappedAdmin() && isValidAdmin(incoming()) && incoming().uid == adminId && incoming().grantedAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(adminId) && isBootstrappedAdmin();
+    }
+
+    // Staff User Profiles
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isSignedIn() && (userId == request.auth.uid || isManager());
+      allow list: if isSignedIn() && (resource.data.uid == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(userId) &&
+        isSignedIn() &&
+        userId == request.auth.uid &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == request.auth.uid &&
+        (incoming().role == 'agent' || isBootstrappedAdmin()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(userId) &&
+        isSignedIn() &&
+        isValidUserProfile(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().email == existing().email &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (isManager() && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'role', 'branch', 'updatedAt'])) ||
+          (userId == request.auth.uid && incoming().role == existing().role && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'branch', 'updatedAt']))
+        );
+      allow delete: if false;
+    }
+
+    // Customers Directory
+    match /customers/{customerId} {
+      allow get: if isValidId(customerId) && isSignedIn() && (existing().ownerId == request.auth.uid || isManager());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(customerId) &&
+        isSignedIn() &&
+        isValidCustomer(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(customerId) &&
+        isSignedIn() &&
+        isValidCustomer(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (
+          (isManager() && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'city', 'preferredBranch', 'segment', 'totalComplaints', 'updatedAt'])) ||
+          (existing().ownerId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'city', 'preferredBranch', 'segment', 'totalComplaints', 'updatedAt']))
+        );
+      allow delete: if isValidId(customerId) && isManager();
+    }
+
+    // Complaints Tickets (with lifecycle transition guard, SLA pause & CSAT)
+    match /complaints/{complaintId} {
+      allow get: if isValidId(complaintId) && isSignedIn() && (existing().ownerId == request.auth.uid || isManager());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(complaintId) &&
+        isSignedIn() &&
+        isValidComplaint(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        (incoming().status != 'closed' || isManager()) &&
+        existsAfter(/databases/$(database)/documents/customers/$(incoming().customerId));
+      allow update: if isValidId(complaintId) &&
+        isSignedIn() &&
+        isValidComplaint(incoming()) &&
+        incoming().ticketCode == existing().ticketCode &&
+        incoming().customerId == existing().customerId &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        !(existing().status == 'new' && incoming().status == 'closed') &&
+        (
+          existing().status != 'closed' ||
+          isManager() ||
+          (existing().ownerId == request.auth.uid && incoming().status == 'reopened')
+        ) &&
+        (
+          (isManager() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'status', 'priority', 'slaTier', 'branch', 'stationUnknown', 'pumpNumber', 'category',
+            'description', 'aiSummary', 'codeSentViaWhatsapp', 'assignedAgentName',
+            'managerNotes', 'closureReason', 'closedBy', 'closedAt',
+            'firstResponseAt', 'resolvedAt', 'pausedAt', 'pausedTotalMinutes', 'pauseCount',
+            'pauseReason', 'pauseReminderAt', 'escalationLevel', 'escalationOwner',
+            'resolutionEvidence', 'publicUpdateNote', 'customerConfirmed', 'csatScore',
+            'csatComment', 'reopenCount', 'reopenReason', 'previousSolution',
+            'cancellationReason', 'auditTrail', 'updatedAt'
+          ])) ||
+          (existing().ownerId == request.auth.uid &&
+            (existing().status != 'closed' || incoming().status == 'reopened') &&
+            incoming().status != 'closed' &&
+            incoming().managerNotes == existing().managerNotes &&
+            incoming().closureReason == existing().closureReason &&
+            incoming().closedBy == existing().closedBy &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'priority', 'slaTier', 'branch', 'stationUnknown', 'pumpNumber', 'category',
+              'description', 'aiSummary', 'codeSentViaWhatsapp', 'assignedAgentName',
+              'firstResponseAt', 'resolvedAt', 'pausedAt', 'pausedTotalMinutes', 'pauseCount',
+              'pauseReason', 'pauseReminderAt', 'escalationLevel', 'escalationOwner',
+              'resolutionEvidence', 'publicUpdateNote', 'customerConfirmed', 'csatScore',
+              'csatComment', 'reopenCount', 'reopenReason', 'previousSolution',
+              'cancellationReason', 'auditTrail', 'updatedAt'
+            ]))
+        );
+      allow delete: if isValidId(complaintId) && isManager();
+    }
+
+    // WhatsApp Conversations & Messages
+    match /conversations/{conversationId} {
+      allow get: if isValidId(conversationId) && isSignedIn() && (existing().ownerId == request.auth.uid || isManager());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(conversationId) &&
+        isSignedIn() &&
+        isValidConversation(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/customers/$(incoming().customerId));
+      allow update: if isValidId(conversationId) &&
+        isSignedIn() &&
+        isValidConversation(incoming()) &&
+        incoming().customerId == existing().customerId &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().ownerId == request.auth.uid || isManager()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'customerName', 'customerPhone', 'aiAutoReplyEnabled',
+          'lastMessage', 'linkedTicketCode', 'unreadCount',
+          'handoffStatus', 'handoffReason', 'handoffAt', 'lastIntent',
+          'escalationRule', 'consecutiveAiFailures', 'updatedAt'
+        ]);
+      allow delete: if isValidId(conversationId) && isManager();
+
+      match /messages/{messageId} {
+        allow get: if isValidId(conversationId) && isValidId(messageId) && isSignedIn() &&
+          (get(/databases/$(database)/documents/conversations/$(conversationId)).data.ownerId == request.auth.uid || isManager());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+        allow create: if isValidId(conversationId) && isValidId(messageId) &&
+          isSignedIn() &&
+          isValidWhatsappMessage(incoming()) &&
+          incoming().ownerId == request.auth.uid &&
+          incoming().createdAt == request.time &&
+          (
+            getAfter(/databases/$(database)/documents/conversations/$(conversationId)).data.ownerId == request.auth.uid ||
+            isManager()
+          );
+        allow update: if false;
+        allow delete: if isValidId(conversationId) && isValidId(messageId) && isManager();
+      }
+    }
+
+    // AI Call Logs
+    match /call_logs/{callId} {
+      allow get: if isValidId(callId) && isSignedIn() && (existing().ownerId == request.auth.uid || isManager());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(callId) &&
+        isSignedIn() &&
+        isValidCallLog(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(callId) && isManager();
+    }
+
+    // WhatsApp Bot Knowledge Base & Configuration
+    match /bot_configs/{configId} {
+      allow get: if isValidId(configId) && isSignedIn() && (configId == request.auth.uid || existing().ownerId == request.auth.uid || isManager());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(configId) &&
+        isSignedIn() &&
+        isValidBotConfig(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        configId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(configId) &&
+        isSignedIn() &&
+        isValidBotConfig(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().ownerId == request.auth.uid || isManager()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'botName', 'officialWhatsappNumber', 'welcomeMessage', 'toneInstruction',
+          'autoEscalateComplex', 'escalationMessage', 'workingHoursSummary',
+          'productsInfo', 'servicesInfo', 'branchesInfo', 'faqs',
+          'updatedBy', 'updatedAt'
+        ]);
+      allow delete: if isValidId(configId) && isManager();
+    }
+
+    // Quality Audits (5 weighted criteria)
+    match /quality_audits/{auditId} {
+      allow get: if isValidId(auditId) && isSignedIn() && (existing().ownerId == request.auth.uid || isManager());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(auditId) &&
+        isSignedIn() &&
+        isValidQualityAudit(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        existsAfter(/databases/$(database)/documents/complaints/$(incoming().complaintId));
+      allow update: if isValidId(auditId) &&
+        isSignedIn() &&
+        isValidQualityAudit(incoming()) &&
+        incoming().complaintId == existing().complaintId &&
+        incoming().ticketCode == existing().ticketCode &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().ownerId == request.auth.uid || isManager()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'auditorName', 'problemUnderstanding', 'communication', 'solutionAndEvidence',
+          'recordCompleteness', 'privacyCompliance', 'totalScore', 'improvementNotes',
+          'status', 'monthKey', 'updatedAt'
+        ]);
+      allow delete: if isValidId(auditId) && isManager();
+    }
+
+    // Monthly Action Plans
+    match /action_plans/{planId} {
+      allow get: if isValidId(planId) && isSignedIn() && (existing().ownerId == request.auth.uid || isManager());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(planId) &&
+        isSignedIn() &&
+        isValidActionPlanItem(incoming()) &&
+        incoming().ownerId == request.auth.uid &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(planId) &&
+        isSignedIn() &&
+        isValidActionPlanItem(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        (existing().ownerId == request.auth.uid || isManager()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'rootCause', 'ownerName', 'dueDateLabel', 'targetMetric', 'status', 'monthKey', 'updatedAt'
+        ]);
+      allow delete: if isValidId(planId) && isManager();
+    }
+  }
+}

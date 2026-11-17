@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>فنار الطاقة للوقود | نظام إدارة علاقات العملاء والشكاوى (CRM)</title>
+    <meta
+      name="description"
+      content="نظام إدارة علاقات العملاء والشكاوى لشركة فنار الطاقة للوقود، مدعوم بالذكاء الاصطناعي للرد على الواتساب والاتصالات وإصدار رموز الشكاوى ومتابعتها وإغلاقها."
+    />
+    <meta property="og:title" content="فنار الطاقة للوقود | نظام إدارة علاقات العملاء والشكاوى (CRM)" />
+    <meta
+      property="og:description"
+      content="منظومة خدمة العملاء والشكاوى الرسمية لشركة فنار الطاقة للوقود مع الرد الآلي الذكي عبر الواتساب والاتصالات وتقارير الطباعة."
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("fanar-theme") || "light";
+          var isDark =
+            t === "dark" ||
+            (t === "system" &&
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (isDark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body class="bg-[#F5F7FA] dark:bg-slate-950 text-[#0F172A] dark:text-slate-100 antialiased selection:bg-[#961B5E]/15 selection:text-[#1B2E66] dark:selection:text-sky-200 transition-colors duration-150">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
